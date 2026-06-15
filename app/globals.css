@@ -3,21 +3,22 @@
 @tailwind utilities;
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --azul-escuro: #0a1d2e;
+  --branco-frio: #f8fefd;
+  --verde: #00d4aa;
+  --cinza-medio: #53606c;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  scroll-behavior: smooth;
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  color: var(--azul-escuro);
+  background: var(--branco-frio);
+  font-family: var(--font-albert), "Albert Sans", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 @layer utilities {
@@ -25,3 +26,9 @@ body {
     text-wrap: balance;
   }
 }
+
+/* Acomoda o header fixo ao navegar por âncoras */
+[id] {
+  scroll-margin-top: 96px;
+}
+
