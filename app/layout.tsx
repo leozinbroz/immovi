@@ -31,11 +31,6 @@ export const metadata: Metadata = {
     'contabilidade para engenheiros',
     'planejamento tributário imobiliário',
   ],
-  icons: {
-    icon: '/icon.png',
-    shortcut: '/icon.png',
-    apple: '/icon.png',
-  },
   authors: [{ name: EMPRESA.nome }],
   openGraph: {
     type: 'website',
