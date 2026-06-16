@@ -1,4 +1,4 @@
-import { getSecretString, type SessionPayload } from './auth-shared'
+import { getSecretString, type SessionPayload, type CrmRole } from './auth-shared'
 
 /**
  * Verificação de JWT HS256 usando apenas Web Crypto — compatível com Edge
@@ -62,10 +62,16 @@ export async function verifyTokenEdge(
     return null
   }
 
+  const rawRole = payload.role
+  const role: CrmRole =
+    rawRole === 'admin' || rawRole === 'atendente' || rawRole === 'viewer'
+      ? rawRole
+      : 'viewer'
+
   return {
     sub: String(payload.sub ?? ''),
     email: String(payload.email ?? ''),
     nome: payload.nome ? String(payload.nome) : undefined,
-    role: payload.role ? String(payload.role) : undefined,
+    role,
   }
 }

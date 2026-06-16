@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin, isSupabaseConfigurado } from '@/lib/supabase/server'
 import { gerarTags } from '@/lib/tags'
+import {
+  rateLimit,
+  readJsonLimited,
+  getSafeWebhookUrl,
+  postWebhook,
+} from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,17 +26,13 @@ function limpar(valor: unknown, max = 500): string {
 }
 
 export async function POST(request: Request) {
-  let body: Record<string, unknown>
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: 'Corpo da requisição inválido.' },
-      { status: 400 }
-    )
-  }
+  const limited = rateLimit(request, 'leads', 10, 60_000)
+  if (limited) return limited
 
-  // Sanitização
+  const parsed = await readJsonLimited<Record<string, unknown>>(request)
+  if ('response' in parsed) return parsed.response
+  const body = parsed.data
+
   const lead = {
     nome: limpar(body.nome, 120),
     whatsapp: limpar(body.whatsapp, 20),
@@ -44,7 +46,6 @@ export async function POST(request: Request) {
     mensagem: limpar(body.mensagem, 2000) || null,
   }
 
-  // Validação backend
   const faltando = CAMPOS_OBRIGATORIOS.filter((c) => !lead[c])
   if (faltando.length > 0) {
     return NextResponse.json(
@@ -58,8 +59,7 @@ export async function POST(request: Request) {
       { status: 400 }
     )
   }
-  const digitosWhats = lead.whatsapp.replace(/\D/g, '')
-  if (digitosWhats.length < 10) {
+  if (lead.whatsapp.replace(/\D/g, '').length < 10) {
     return NextResponse.json(
       { ok: false, error: 'WhatsApp inválido.' },
       { status: 400 }
@@ -79,21 +79,14 @@ export async function POST(request: Request) {
     )
   }
 
-  // Tags automáticas
   const tags = gerarTags({
     tipo_atuacao: lead.tipo_atuacao,
     principal_necessidade: lead.principal_necessidade,
   })
 
-  // Persistência
   const { data, error } = await supabaseAdmin
     .from('leads_immovi')
-    .insert({
-      ...lead,
-      tags,
-      status: 'Novo',
-      origem: 'site_immovi',
-    })
+    .insert({ ...lead, tags, status: 'Novo', origem: 'site_immovi' })
     .select('id')
     .single()
 
@@ -105,18 +98,11 @@ export async function POST(request: Request) {
     )
   }
 
-  // Webhook opcional (não bloqueia a resposta em caso de falha)
-  const webhookUrl = process.env.WEBHOOK_WHATSAPP_URL
+  const webhookUrl = getSafeWebhookUrl()
   if (webhookUrl) {
-    try {
-      await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: data.id, ...lead, tags }),
-      })
-    } catch (e) {
+    postWebhook(webhookUrl, { id: data.id, ...lead, tags }).catch((e) =>
       console.error('[api/leads] webhook falhou:', e)
-    }
+    )
   }
 
   return NextResponse.json({ ok: true, id: data.id }, { status: 201 })

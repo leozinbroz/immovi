@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { requireApiSession } from '@/lib/crm-session'
 import { supabaseAdmin, isSupabaseConfigurado } from '@/lib/supabase/server'
+import { safeSearch } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -20,7 +21,7 @@ export async function GET(request: Request) {
   const tipo = searchParams.get('tipo_atuacao') || ''
   const necessidade = searchParams.get('principal_necessidade') || ''
   const origem = searchParams.get('origem') || ''
-  const q = (searchParams.get('q') || '').trim()
+  const q = safeSearch(searchParams.get('q') || '')
   const pagina = Math.max(1, Number(searchParams.get('page') || '1') || 1)
 
   let query = supabaseAdmin
@@ -32,7 +33,11 @@ export async function GET(request: Request) {
   if (tipo) query = query.eq('tipo_atuacao', tipo)
   if (necessidade) query = query.eq('principal_necessidade', necessidade)
   if (origem) query = query.eq('origem', origem)
-  if (q) query = query.or(`nome.ilike.%${q}%,whatsapp.ilike.%${q}%,email.ilike.%${q}%`)
+  if (q) {
+    query = query.or(
+      `nome.ilike.%${q}%,whatsapp.ilike.%${q}%,email.ilike.%${q}%`
+    )
+  }
 
   const from = (pagina - 1) * POR_PAGINA
   query = query.range(from, from + POR_PAGINA - 1)

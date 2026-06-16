@@ -1,5 +1,11 @@
 import { NextResponse } from 'next/server'
 import { supabaseAdmin, isSupabaseConfigurado } from '@/lib/supabase/server'
+import {
+  rateLimit,
+  readJsonLimited,
+  getSafeWebhookUrl,
+  postWebhook,
+} from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -10,24 +16,28 @@ function limpar(valor: unknown, max = 500): string {
 }
 
 export async function POST(request: Request) {
-  let body: Record<string, unknown>
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Requisição inválida.' }, { status: 400 })
-  }
+  const limited = rateLimit(request, 'widget', 10, 60_000)
+  if (limited) return limited
+
+  const parsed = await readJsonLimited<Record<string, unknown>>(request)
+  if ('response' in parsed) return parsed.response
+  const body = parsed.data
 
   const nome = limpar(body.nome, 120)
   const whatsapp = limpar(body.whatsapp, 20)
   const mensagem = limpar(body.mensagem, 1000) || null
 
   if (!nome) {
-    return NextResponse.json({ ok: false, error: 'Nome é obrigatório.' }, { status: 400 })
+    return NextResponse.json(
+      { ok: false, error: 'Nome é obrigatório.' },
+      { status: 400 }
+    )
   }
-
-  const digitos = whatsapp.replace(/\D/g, '')
-  if (digitos.length < 10) {
-    return NextResponse.json({ ok: false, error: 'WhatsApp inválido.' }, { status: 400 })
+  if (whatsapp.replace(/\D/g, '').length < 10) {
+    return NextResponse.json(
+      { ok: false, error: 'WhatsApp inválido.' },
+      { status: 400 }
+    )
   }
 
   if (!isSupabaseConfigurado()) {
@@ -62,17 +72,15 @@ export async function POST(request: Request) {
     )
   }
 
-  const webhookUrl = process.env.WEBHOOK_WHATSAPP_URL
+  const webhookUrl = getSafeWebhookUrl()
   if (webhookUrl) {
-    try {
-      await fetch(webhookUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: data.id, nome, whatsapp, mensagem, origem: 'widget_whatsapp' }),
-      })
-    } catch (e) {
-      console.error('[api/leads/widget] webhook falhou:', e)
-    }
+    postWebhook(webhookUrl, {
+      id: data.id,
+      nome,
+      whatsapp,
+      mensagem,
+      origem: 'widget_whatsapp',
+    }).catch((e) => console.error('[api/leads/widget] webhook falhou:', e))
   }
 
   return NextResponse.json({ ok: true, id: data.id }, { status: 201 })

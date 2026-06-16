@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server'
-import { requireApiSession } from '@/lib/crm-session'
+import { requireApiSession, requireApiRole } from '@/lib/crm-session'
 import { supabaseAdmin } from '@/lib/supabase/server'
 import { STATUS_LEAD } from '@/lib/constants'
+import { assertSameOrigin, isUuid, readJsonLimited } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -13,6 +14,10 @@ interface Params {
 export async function GET(_request: Request, { params }: Params) {
   const auth = await requireApiSession()
   if ('response' in auth) return auth.response
+
+  if (!isUuid(params.id)) {
+    return NextResponse.json({ ok: false, error: 'ID inválido.' }, { status: 400 })
+  }
 
   const { data: lead, error } = await supabaseAdmin
     .from('leads_immovi')
@@ -33,15 +38,19 @@ export async function GET(_request: Request, { params }: Params) {
 }
 
 export async function PATCH(request: Request, { params }: Params) {
+  const csrf = assertSameOrigin(request)
+  if (csrf) return csrf
+
   const auth = await requireApiSession()
   if ('response' in auth) return auth.response
 
-  let body: { status?: string; observacao?: string }
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json({ ok: false, error: 'Requisição inválida.' }, { status: 400 })
+  if (!isUuid(params.id)) {
+    return NextResponse.json({ ok: false, error: 'ID inválido.' }, { status: 400 })
   }
+
+  const parsed = await readJsonLimited<{ status?: string; observacao?: string }>(request)
+  if ('response' in parsed) return parsed.response
+  const body = parsed.data
 
   const novoStatus = (body.status || '').trim()
   if (!novoStatus || !STATUS_LEAD.includes(novoStatus as (typeof STATUS_LEAD)[number])) {
@@ -57,8 +66,6 @@ export async function PATCH(request: Request, { params }: Params) {
   if (erroAtual) return NextResponse.json({ ok: false, error: erroAtual.message }, { status: 500 })
   if (!atual) return NextResponse.json({ ok: false, error: 'Lead não encontrado.' }, { status: 404 })
 
-  const statusAnterior = atual.status as string
-
   const { error: erroUpdate } = await supabaseAdmin
     .from('leads_immovi')
     .update({ status: novoStatus, atualizado_em: new Date().toISOString() })
@@ -66,20 +73,27 @@ export async function PATCH(request: Request, { params }: Params) {
 
   if (erroUpdate) return NextResponse.json({ ok: false, error: erroUpdate.message }, { status: 500 })
 
-  // Registra no histórico
   await supabaseAdmin.from('leads_immovi_historico').insert({
     lead_id: params.id,
     observacao: body.observacao?.trim() || null,
-    status_anterior: statusAnterior,
+    status_anterior: atual.status as string,
     status_novo: novoStatus,
   })
 
   return NextResponse.json({ ok: true })
 }
 
-export async function DELETE(_request: Request, { params }: Params) {
-  const auth = await requireApiSession()
+export async function DELETE(request: Request, { params }: Params) {
+  const csrf = assertSameOrigin(request)
+  if (csrf) return csrf
+
+  // Exclusão exige role admin
+  const auth = await requireApiRole(['admin'])
   if ('response' in auth) return auth.response
+
+  if (!isUuid(params.id)) {
+    return NextResponse.json({ ok: false, error: 'ID inválido.' }, { status: 400 })
+  }
 
   const { error } = await supabaseAdmin
     .from('leads_immovi')

@@ -2,20 +2,18 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { signToken, COOKIE_NAME, TOKEN_MAX_AGE } from '@/lib/auth'
 import { supabaseAdmin, isSupabaseConfigurado } from '@/lib/supabase/server'
+import { rateLimit, readJsonLimited } from '@/lib/security'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
-  let body: { email?: string; senha?: string }
-  try {
-    body = await request.json()
-  } catch {
-    return NextResponse.json(
-      { ok: false, error: 'Requisição inválida.' },
-      { status: 400 }
-    )
-  }
+  const limited = rateLimit(request, 'login', 5, 60_000)
+  if (limited) return limited
+
+  const parsed = await readJsonLimited<{ email?: string; senha?: string }>(request)
+  if ('response' in parsed) return parsed.response
+  const body = parsed.data
 
   const email = (body.email || '').trim().toLowerCase()
   const senha = body.senha || ''
@@ -27,18 +25,14 @@ export async function POST(request: Request) {
     )
   }
 
-  let autenticado: { sub: string; email: string; nome?: string; role?: string } | null =
-    null
+  let autenticado: {
+    sub: string
+    email: string
+    nome?: string
+    role?: 'admin' | 'atendente' | 'viewer'
+  } | null = null
 
-  // 1) Admin de bootstrap via variáveis de ambiente
-  const adminEmail = (process.env.CRM_ADMIN_EMAIL || '').trim().toLowerCase()
-  const adminSenha = process.env.CRM_ADMIN_SENHA || ''
-  if (adminEmail && adminSenha && email === adminEmail && senha === adminSenha) {
-    autenticado = { sub: 'admin-env', email, nome: 'Administrador', role: 'admin' }
-  }
-
-  // 2) Usuário cadastrado na tabela crm_users (hash bcrypt)
-  if (!autenticado && isSupabaseConfigurado()) {
+  if (isSupabaseConfigurado()) {
     const { data: user } = await supabaseAdmin
       .from('crm_users')
       .select('id, email, nome, role, senha_hash, ativo')

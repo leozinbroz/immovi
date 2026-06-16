@@ -2,20 +2,14 @@ import 'server-only'
 import { cookies } from 'next/headers'
 import { NextResponse } from 'next/server'
 import { COOKIE_NAME, verifyToken, type SessionPayload } from './auth'
+import type { CrmRole } from './auth-shared'
 
-/**
- * Lê e valida a sessão do CRM a partir do cookie HttpOnly.
- * Uso em Server Components e Route Handlers (Node runtime).
- */
 export async function getSession(): Promise<SessionPayload | null> {
   const token = cookies().get(COOKIE_NAME)?.value
   if (!token) return null
   return verifyToken(token)
 }
 
-/**
- * Guarda para Route Handlers do CRM. Retorna a sessão ou uma resposta 401.
- */
 export async function requireApiSession(): Promise<
   { session: SessionPayload } | { response: NextResponse }
 > {
@@ -29,4 +23,23 @@ export async function requireApiSession(): Promise<
     }
   }
   return { session }
+}
+
+export async function requireApiRole(
+  allowed: CrmRole[]
+): Promise<{ session: SessionPayload } | { response: NextResponse }> {
+  const auth = await requireApiSession()
+  if ('response' in auth) return auth
+
+  const role = auth.session.role ?? 'viewer'
+  if (!allowed.includes(role)) {
+    return {
+      response: NextResponse.json(
+        { ok: false, error: 'Permissão insuficiente.' },
+        { status: 403 }
+      ),
+    }
+  }
+
+  return auth
 }
